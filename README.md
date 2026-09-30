@@ -16,6 +16,10 @@
 
 GNOME Shell shows your workspaces as dots inside the Activities button. This extension shows them as buttons with their names instead, such as Home, Code and Media, so you can see where you are and go straight to where you want to be. It is part of the [NorviOS](https://github.com/spencercnorton/norvi-os) desktop and supports GNOME Shell 50.
 
+<p align="center">
+  <img alt="The left end of the GNOME top bar: four workspace buttons, Home, Code, Media and Game. Home is the active one, a dark pill in the accent colour; Code has windows on it and is bright; Media and Game are empty and dimmed." src="docs/screenshots/top-bar.png" width="275">
+</p>
+
 ## What it does
 
 **A button for every workspace, by name.** The names come from GNOME's own workspace-names setting; a workspace without a name shows as "Workspace 2". Workspaces with windows on them are bright, empty ones are dimmed.
