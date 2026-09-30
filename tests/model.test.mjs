@@ -8,6 +8,7 @@ import {
     accentPill,
     buildWorkspaceModel,
     contrastRatio,
+    drawnColour,
     renamedWorkspaceNames,
     workspaceAccessibleName,
     workspaceLabel,
@@ -114,14 +115,22 @@ const rgb = hex => ({
     blue: parseInt(hex.slice(5, 7), 16),
 });
 
-test('the purple accent gives the established pill colours', () => {
+test('the purple accent gives the established pill with a label lighter by a step', () => {
+    // One step darker, rgb(167, 154, 230) has 7.33:1 as a colour but only
+    // 6.7:1 as drawn where antialiasing blends a stroke 5% into the pill.
     assert.deepEqual(accentPill(rgb(ACCENTS['yaru dark'].purple)),
-        {background: [21, 18, 39], foreground: [167, 154, 230]});
+        {background: [21, 18, 39], foreground: [173, 162, 232]});
     assert.deepEqual(accentPill(rgb(ACCENTS.gnome.purple)),
-        {background: [26, 12, 31], foreground: [189, 141, 205]});
+        {background: [26, 12, 31], foreground: [195, 151, 209]});
 });
 
-test('every accent gives a dark pill with at least 7:1 contrast', () => {
+test('a stroke drawn at 95% coverage blends the label towards the pill', () => {
+    assert.deepEqual(drawnColour([200, 100, 0], [0, 100, 200]), [190, 100, 10]);
+    assert.deepEqual(drawnColour([200, 100, 0], [0, 100, 200], 1), [200, 100, 0]);
+    assert.ok(contrastRatio(drawnColour([167, 154, 230], [21, 18, 39]), [21, 18, 39]) < 7);
+});
+
+test('every accent gives a dark pill whose label keeps 7:1 as drawn', () => {
     for (const [palette, accents] of Object.entries(ACCENTS)) {
         assert.equal(Object.keys(accents).length, 10, palette);
         for (const [name, hex] of Object.entries(accents)) {
@@ -130,15 +139,16 @@ test('every accent gives a dark pill with at least 7:1 contrast', () => {
             const what = `${palette} ${name}`;
             assert.deepEqual(background,
                 [accent.red, accent.green, accent.blue].map(c => Math.round(c * 0.18)), what);
-            assert.ok(contrastRatio(foreground, background) >= 7,
-                `${what}: ${contrastRatio(foreground, background).toFixed(2)}:1`);
+            const drawn = contrastRatio(drawnColour(foreground, background), background);
+            assert.ok(drawn >= 7, `${what}: ${drawn.toFixed(2)}:1 as drawn`);
+            assert.ok(contrastRatio(foreground, background) > drawn, what);
             // The label keeps the accent's hue: lightened, never replaced by white.
             assert.notDeepEqual(foreground, [255, 255, 255], what);
         }
     }
 });
 
-test('the label is lightened no further than 7:1 needs', () => {
+test('the label is lightened no further than 7:1 as drawn needs', () => {
     for (const accents of Object.values(ACCENTS)) {
         for (const hex of Object.values(accents)) {
             const accent = rgb(hex);
@@ -150,7 +160,7 @@ test('the label is lightened no further than 7:1 needs', () => {
             assert.ok(step !== undefined);
             if (step > 0) {
                 const previous = channels.map(c => Math.round(c + (255 - c) * (step - 1) / 20));
-                assert.ok(contrastRatio(previous, background) < 7, hex);
+                assert.ok(contrastRatio(drawnColour(previous, background), background) < 7, hex);
             }
         }
     }

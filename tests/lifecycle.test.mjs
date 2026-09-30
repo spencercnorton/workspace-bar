@@ -57,6 +57,7 @@ class Actor extends Emitter {
             stage.grabFocus(null);
         this._changing = false;
     }
+    get child() { return this.children[0] ?? null; }
     set(params) { Object.assign(this, params); }
     add_style_class_name() {}
     add_child(child) { this.children.push(child); child.parent = this; }
@@ -89,7 +90,27 @@ class Actor extends Emitter {
     get_accessible() { return null; }
 }
 
+// How St colours text. An St.Label takes its colour from its parents
+// whenever it is drawn. St.Button's own `label` is a bare text that St
+// colours only when the button first appears or its style changes, not when
+// the text is made: made on a button already on the stage, it stays black.
+function inheritedColour(actor) {
+    for (let a = actor.parent; a; a = a.parent) {
+        const colour = a.style?.match(/(?:^|\s)color: (rgb\([^)]*\))/)?.[1];
+        if (colour)
+            return colour;
+        if (a === panel)
+            return 'top bar';
+    }
+    return null;
+}
+
+class BareText extends Actor {
+    get colour() { return this.fixedColour ?? inheritedColour(this); }
+}
+
 class Label extends Actor {
+    get colour() { return inheritedColour(this); }
     _init(params) { this._text = ''; this.bindings = []; super._init(params); }
     get text() { return this._text; }
     set text(text) { this._text = text; this.bindings.forEach(([target, property]) => (target[property] = text)); }
@@ -112,6 +133,22 @@ class Button extends Actor {
             this._checked = checked;
             this.emit('notify::checked');
         }
+    }
+    get label() { return this._text?.text; }
+    set label(text) {
+        if (!this._text) {
+            this._text = new BareText();
+            this.add_child(this._text);
+            if (inheritedColour(this._text))
+                this._text.fixedColour = 'black';
+        }
+        this._text.text = text;
+    }
+    get style() { return this._style; }
+    set style(style) {
+        if (style !== this._style && this._text)
+            delete this._text.fixedColour;
+        this._style = style;
     }
 }
 
@@ -205,6 +242,7 @@ globalThis.global = {stage, display, workspace_manager: manager, workspaceManage
 
 const panel = new Actor();
 panel._leftBox = new Actor();
+panel.add_child(panel._leftBox);
 panel.statusArea = {activities: new PanelButton(0, 'Activities')};
 panel._leftBox.add_child(panel.statusArea.activities.container);
 panel.addToStatusArea = (role, indicator, position, box) => {
@@ -273,7 +311,9 @@ const mutterSettings = new Settings({schema_id: 'org.gnome.mutter'});
 const bar = () => panel.statusArea[uuid];
 const buttons = () => bar().get_children()[0].get_children();
 const menuItems = () => [...bar().menu.box.children[0].children[0]];
-const PURPLE_PILL = 'background-color: rgb(21,18,39); color: rgb(167,154,230);';
+const PURPLE_PILL = 'background-color: rgb(21,18,39); color: rgb(173,162,232);';
+const names = () => buttons().map(b => b.child.text);
+const colours = () => buttons().map(b => b.child.colour);
 
 wmSettings.set_strv('workspace-names', ['Home', 'Code', 'Media']);
 
@@ -282,7 +322,8 @@ test('enable puts one button per workspace first in the top bar', () => {
 
     assert.ok(bar());
     assert.equal(panel._leftBox.children[0], bar().container);
-    assert.deepEqual(buttons().map(b => b.label), ['Home', 'Code', 'Media', 'Workspace 4']);
+    assert.deepEqual(names(), ['Home', 'Code', 'Media', 'Workspace 4']);
+    assert.deepEqual(colours(), ['rgb(173,162,232)', 'top bar', 'top bar', 'top bar']);
     assert.deepEqual(buttons().map(b => b.accessible_name), [
         'Workspace 1: Home, active, occupied',
         'Workspace 2: Code, inactive, occupied',
@@ -291,7 +332,9 @@ test('enable puts one button per workspace first in the top bar', () => {
     ]);
     assert.deepEqual(buttons().map(b => b.style), [PURPLE_PILL, null, null, null]);
     // Only skip-taskbar windows count as empty; the active one is never dimmed.
-    assert.deepEqual(buttons().map(b => b.opacity), [255, 255, 166, 166]);
+    // The name is dimmed, not the button with its focus ring.
+    assert.deepEqual(buttons().map(b => b.child.opacity), [255, 255, 166, 166]);
+    assert.deepEqual(buttons().map(b => b.opacity), [255, 255, 255, 255]);
     assert.deepEqual(menuItems().map(item => item.label.text), ['Home', 'Code', 'Media', 'Workspace 4']);
     assert.deepEqual(menuItems().map(item => item.ornament), [2, 0, 0, 0]);
 });
@@ -313,7 +356,7 @@ test('a click switches workspace and the pill follows', () => {
     assert.equal(manager.active, 2);
     assert.equal(manager.workspaces[2].activatedAt, 1234);
     assert.deepEqual(buttons().map(b => b.style), [null, null, PURPLE_PILL, null]);
-    assert.deepEqual(buttons().map(b => b.opacity), [255, 255, 255, 166]);
+    assert.deepEqual(buttons().map(b => b.child.opacity), [255, 255, 255, 166]);
 });
 
 test('a secondary click or the menu key opens the menu; a primary click on the gaps does not', () => {
@@ -346,9 +389,17 @@ test('a sync while a workspace is being removed waits for the rebuild', () => {
     manager.setWorkspaces([[window()], [window()], []]);
     manager.active = 0;
     manager.emit('notify::n-workspaces');
-    assert.deepEqual(buttons().map(b => b.label), ['Home', 'Code', 'Media']);
+    assert.deepEqual(names(), ['Home', 'Code', 'Media']);
     assert.equal(menuItems().length, 3);
     assert.ok(before.every(b => b.destroyed));
+});
+
+test('names keep the top bar colour when the workspace count changes', () => {
+    for (const count of [5, 4]) {
+        manager.setWorkspaces([[window()], ...Array.from({length: count - 1}, () => [])]);
+        manager.emit('notify::n-workspaces');
+        assert.deepEqual(colours(), ['rgb(173,162,232)', ...Array(count - 1).fill('top bar')]);
+    }
 });
 
 test('a rename in the menu writes only that workspace to workspace-names', () => {
@@ -366,7 +417,7 @@ test('a rename in the menu writes only that workspace to workspace-names', () =>
     assert.equal(item.label.text, 'Media');
     assert.equal(item._editButton.checked, false);
     assert.equal(item._entry.visible, false);
-    assert.deepEqual(buttons().map(b => b.label), ['Home', 'Workspace 2', 'Media', 'Workspace 4']);
+    assert.deepEqual(names(), ['Home', 'Workspace 2', 'Media', 'Workspace 4']);
     // Hiding the focused entry, and unchecking the edit button, must not
     // re-enter the end of editing.
     assert.deepEqual(problems, []);
@@ -381,7 +432,7 @@ test('a menu item switches to its workspace', () => {
 test('the pill follows an accent colour change', () => {
     themeContext.accent = {red: 48, green: 130, blue: 128, alpha: 255};
     themeContext.emit('changed');
-    assert.equal(buttons()[3].style, 'background-color: rgb(9,23,23); color: rgb(120,174,172);');
+    assert.equal(buttons()[3].style, 'background-color: rgb(9,23,23); color: rgb(131,180,179);');
 });
 
 test('with dynamic workspaces the trailing empty workspace gets no button', () => {

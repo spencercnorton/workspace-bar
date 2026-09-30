@@ -7,10 +7,14 @@
 
 /* The labels inherit the top bar's text colour, so they suit both the dark
  * and the light top bar. extension.js sets the active workspace's colours from
- * the accent colour, and dims empty workspaces. */
+ * the accent colour, and dims the names of empty workspaces. */
 .workspace-bar-button {
   margin: 0 4px;
-  padding: 3px 8px;
+  padding: 1px 6px;
+  /* The keyboard focus ring is this border. St draws an inset shadow only
+   * over a background or a border, so a shadow ring would not show on an
+   * inactive button. The border takes 2px of the padding: nothing moves. */
+  border: 2px solid transparent;
   border-radius: 8px;
   transition-duration: 250ms;
 }
@@ -20,7 +24,7 @@
 }
 
 .workspace-bar-button:focus {
-  box-shadow: inset 0 0 0 2px -st-accent-color;
+  border-color: -st-accent-color;
 }
 
 /* The rename menu: a label, and the entry that replaces it while editing.

@@ -18,7 +18,8 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {accentPill, buildWorkspaceModel, workspaceAccessibleName} from './model.js';
 import {WorkspacesMenu} from './workspacesMenu.js';
 
-// Empty workspaces other than the active one are drawn at 65% opacity.
+// The names of empty workspaces other than the active one are drawn at 65%
+// opacity. Only the name: the focus ring and the hover stay at full strength.
 const EMPTY_OPACITY = 166;
 
 class WorkspaceButton extends St.Button {
@@ -32,15 +33,19 @@ class WorkspaceButton extends St.Button {
             accessible_role: Atk.Role.PUSH_BUTTON,
             can_focus: true,
             track_hover: true,
+            // A label of its own, not St.Button's `label`: St colours that
+            // one only when the button's style changes, which leaves a name
+            // set on a button already on screen black.
+            child: new St.Label({y_align: Clutter.ActorAlign.CENTER}),
         });
     }
 
     sync(state, pillStyle) {
-        this.label = state.label;
+        this.child.text = state.label;
         this.accessible_name = workspaceAccessibleName(state);
         this.visible = state.visible;
         this.style = state.active ? pillStyle : null;
-        this.opacity = state.empty && !state.active ? EMPTY_OPACITY : 255;
+        this.child.opacity = state.empty && !state.active ? EMPTY_OPACITY : 255;
     }
 }
 

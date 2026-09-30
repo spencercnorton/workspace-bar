@@ -71,16 +71,26 @@ export function contrastRatio(a, b) {
     return (lighter + 0.05) / (darker + 0.05);
 }
 
+// Antialiased text never quite reaches its colour: even the middle of a
+// stroke can be the label colour blended 95% into the pill.
+const STROKE_COVERAGE = 0.95;
+
+// The label colour as it is drawn where a stroke covers `coverage` of a pixel.
+export function drawnColour(foreground, background, coverage = STROKE_COVERAGE) {
+    return foreground.map((c, i) => background[i] + (c - background[i]) * coverage);
+}
+
 // The active workspace is a pill in the accent colour darkened by 82%. Its
 // label is the accent colour lightened towards white in 5% steps, stopping at
-// the first step with at least 7:1 contrast against the pill.
+// the first step at which the label as drawn has at least 7:1 contrast
+// against the pill.
 export function accentPill({red, green, blue}) {
     const accent = [red, green, blue];
     const background = accent.map(c => Math.round(c * 0.18));
     let foreground = accent;
     for (let step = 0; step <= 20; step++) {
         foreground = accent.map(c => Math.round(c + (255 - c) * step / 20));
-        if (contrastRatio(foreground, background) >= 7)
+        if (contrastRatio(drawnColour(foreground, background), background) >= 7)
             break;
     }
     return {background, foreground};

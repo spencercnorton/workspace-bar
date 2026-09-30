@@ -24,7 +24,7 @@ GNOME Shell shows your workspaces as dots inside the Activities button. This ext
 
 **Rename from the top bar.** Right-click the bar, or press the Menu key on a focused button, for the list of workspaces; the pencil next to one renames it. The name is written to GNOME's own setting, so anything else that shows workspace names sees it too.
 
-**The active workspace follows your accent colour.** It is a dark pill in the accent colour, with its name lightened until it has at least 7:1 contrast.
+**The active workspace follows your accent colour.** It is a dark pill in the accent colour, with its name lightened until it has at least 7:1 contrast as drawn: the margin covers the way antialiasing softens text.
 
 **Dynamic workspaces work too.** With GNOME's dynamic workspaces, the empty workspace GNOME keeps at the end gets a button only while you are on it.
 
