@@ -1,0 +1,39 @@
+/* SPDX-FileCopyrightText: 2011 Erick Pérez Castellanos <erick.red@gmail.com>
+ * SPDX-FileCopyrightText: 2019 Florian Müllner <fmuellner@gnome.org>
+ * SPDX-FileCopyrightText: 2026 Spencer Norton
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later AND GPL-3.0-or-later
+ */
+
+/* The labels inherit the top bar's text colour, so they suit both the dark
+ * and the light top bar. extension.js sets the active workspace's colours from
+ * the accent colour, and dims empty workspaces. */
+.workspace-bar-button {
+  margin: 0 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  transition-duration: 250ms;
+}
+
+.workspace-bar-button:hover {
+  background-color: rgba(128, 128, 128, 0.25);
+}
+
+.workspace-bar-button:focus {
+  box-shadow: inset 0 0 0 2px -st-accent-color;
+}
+
+/* The rename menu: a label, and the entry that replaces it while editing.
+ * Adapted from the workspace-indicator stylesheet in GNOME Shell Extensions. */
+.workspace-bar-menu .editable-menu-item StLabel {
+  padding: 0 9px;
+}
+
+.workspace-bar-menu .editable-menu-item StLabel,
+.workspace-bar-menu .editable-menu-item StEntry {
+  width: 10em;
+}
+
+.workspace-bar-menu .editable-menu-item .icon-button {
+  padding: 6px;
+}

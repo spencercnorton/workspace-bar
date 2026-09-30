@@ -1,0 +1,30 @@
+name: Bug report
+description: A button is missing or wrong, a click or scroll does not switch, a rename does not stick, or disabling does not bring Activities back.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove machine names, user names and personal paths from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+      placeholder: After renaming the second workspace from the menu, the top bar still showed its old name.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `gnome-shell --version` and `gnome-extensions info workspace-bar@spencercnorton.github.io`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt
+      description: The relevant lines from `journalctl --user -b | grep -i workspace-bar`, scrubbed.
+      render: text

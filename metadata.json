@@ -1,0 +1,11 @@
+{
+    "uuid": "workspace-bar@spencercnorton.github.io",
+    "name": "Workspace Bar",
+    "description": "Named buttons for every workspace in the top bar, in place of the Activities button. Click or scroll to switch workspace, right-click to rename one. The active workspace follows the accent colour.",
+    "shell-version": [
+        "50"
+    ],
+    "url": "https://github.com/spencercnorton/workspace-bar",
+    "version": 1,
+    "version-name": "1.0.0"
+}

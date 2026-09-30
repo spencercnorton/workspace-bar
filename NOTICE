@@ -1,0 +1,24 @@
+Workspace Bar
+https://github.com/spencercnorton/workspace-bar
+
+An independent implementation: apart from the GNOME code credited below, it
+contains no code from other workspace extensions.
+
+GNOME Shell Extensions
+----------------------
+The rename menu (workspacesMenu.js, and its rules in stylesheet.css) and parts
+of the top-bar button (extension.js) are adapted from the workspace-indicator
+extension in GNOME Shell Extensions, at commit
+57d050555587da1d9977161792d2337a0e2e2e7d:
+
+  https://gitlab.gnome.org/GNOME/gnome-shell-extensions
+
+That code is copyright 2011 Erick Pérez Castellanos, 2011 Giovanni Campagna,
+2017-2019 Florian Müllner and other GNOME contributors, and is licensed under
+the GNU General Public License, version 2 or (at your option) any later
+version. The three files keep its notices.
+
+Licence
+-------
+Licensed under the GNU General Public License, version 3 or (at your option)
+any later version; see LICENSE. Copyright 2026 Spencer Norton.

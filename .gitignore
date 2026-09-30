@@ -1,0 +1,7 @@
+dist/
+debian/.debhelper/
+debian/files
+debian/gnome-shell-extension-workspace-bar/
+debian/*.substvars
+debian/*.log
+debian/debhelper-build-stamp
