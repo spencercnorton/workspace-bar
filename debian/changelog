@@ -1,3 +1,10 @@
+gnome-shell-extension-workspace-bar (1.0.1) resolute; urgency=medium
+
+  * The active workspace's pill is as tall as its name, not the top bar.
+  * Workspace names are bold.
+
+ -- Norvi <apt@globalentry.systems>  Mon, 05 Oct 2026 00:00:00 +0000
+
 gnome-shell-extension-workspace-bar (1.0.0) resolute; urgency=medium
 
   * First public release.

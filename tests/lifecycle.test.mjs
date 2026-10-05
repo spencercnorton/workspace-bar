@@ -272,7 +272,7 @@ globalThis.__stubs = {
     GObject: {registerClass: (klass, maybeKlass) => maybeKlass ?? klass, signals: Symbol('signals'), BindingFlags: {DEFAULT: 0}},
     Shell: {Stack: Actor},
     St: {
-        BoxLayout: Actor, Button, Entry, Label, ScrollView: Actor,
+        Bin: Actor, BoxLayout: Actor, Button, Entry, Label, ScrollView: Actor,
         ButtonMask: {ONE: 1}, DirectionType: {TAB_FORWARD: 0}, Side: {TOP: 0},
         ThemeContext: {get_for_stage: () => themeContext},
     },
@@ -312,8 +312,11 @@ const bar = () => panel.statusArea[uuid];
 const buttons = () => bar().get_children()[0].get_children();
 const menuItems = () => [...bar().menu.box.children[0].children[0]];
 const PURPLE_PILL = 'background-color: rgb(21,18,39); color: rgb(173,162,232);';
-const names = () => buttons().map(b => b.child.text);
-const colours = () => buttons().map(b => b.child.colour);
+// Each button holds the pill, and the pill holds the name.
+const pills = () => buttons().map(b => b.child);
+const labels = () => pills().map(p => p.child);
+const names = () => labels().map(l => l.text);
+const colours = () => labels().map(l => l.colour);
 
 wmSettings.set_strv('workspace-names', ['Home', 'Code', 'Media']);
 
@@ -330,10 +333,12 @@ test('enable puts one button per workspace first in the top bar', () => {
         'Workspace 3: Media, inactive, empty',
         'Workspace 4: Workspace 4, inactive, empty',
     ]);
-    assert.deepEqual(buttons().map(b => b.style), [PURPLE_PILL, null, null, null]);
+    assert.deepEqual(pills().map(p => p.style), [PURPLE_PILL, null, null, null]);
+    assert.deepEqual(buttons().map(b => b.style), [null, null, null, null]);
     // Only skip-taskbar windows count as empty; the active one is never dimmed.
     // The name is dimmed, not the button with its focus ring.
-    assert.deepEqual(buttons().map(b => b.child.opacity), [255, 255, 166, 166]);
+    assert.deepEqual(labels().map(l => l.opacity), [255, 255, 166, 166]);
+    assert.deepEqual(pills().map(p => p.opacity), [255, 255, 255, 255]);
     assert.deepEqual(buttons().map(b => b.opacity), [255, 255, 255, 255]);
     assert.deepEqual(menuItems().map(item => item.label.text), ['Home', 'Code', 'Media', 'Workspace 4']);
     assert.deepEqual(menuItems().map(item => item.ornament), [2, 0, 0, 0]);
@@ -355,8 +360,8 @@ test('a click switches workspace and the pill follows', () => {
     buttons()[2].emit('clicked');
     assert.equal(manager.active, 2);
     assert.equal(manager.workspaces[2].activatedAt, 1234);
-    assert.deepEqual(buttons().map(b => b.style), [null, null, PURPLE_PILL, null]);
-    assert.deepEqual(buttons().map(b => b.child.opacity), [255, 255, 255, 166]);
+    assert.deepEqual(pills().map(p => p.style), [null, null, PURPLE_PILL, null]);
+    assert.deepEqual(labels().map(l => l.opacity), [255, 255, 255, 166]);
 });
 
 test('a secondary click or the menu key opens the menu; a primary click on the gaps does not', () => {
@@ -432,7 +437,7 @@ test('a menu item switches to its workspace', () => {
 test('the pill follows an accent colour change', () => {
     themeContext.accent = {red: 48, green: 130, blue: 128, alpha: 255};
     themeContext.emit('changed');
-    assert.equal(buttons()[3].style, 'background-color: rgb(9,23,23); color: rgb(131,180,179);');
+    assert.equal(pills()[3].style, 'background-color: rgb(9,23,23); color: rgb(131,180,179);');
 });
 
 test('with dynamic workspaces the trailing empty workspace gets no button', () => {

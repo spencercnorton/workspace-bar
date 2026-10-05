@@ -28,24 +28,33 @@ class WorkspaceButton extends St.Button {
     }
 
     constructor() {
+        // A label of its own, not St.Button's `label`: St colours that one
+        // only when the button's style changes, which leaves a name set on a
+        // button already on screen black.
+        const label = new St.Label();
         super({
             style_class: 'workspace-bar-button',
             accessible_role: Atk.Role.PUSH_BUTTON,
             can_focus: true,
             track_hover: true,
-            // A label of its own, not St.Button's `label`: St colours that
-            // one only when the button's style changes, which leaves a name
-            // set on a button already on screen black.
-            child: new St.Label({y_align: Clutter.ActorAlign.CENTER}),
+            // The button fills the height of the top bar, so a click at the
+            // screen edge still lands. The pill is drawn on this box instead,
+            // which is only as tall as the name.
+            child: new St.Bin({
+                style_class: 'workspace-bar-pill',
+                y_align: Clutter.ActorAlign.CENTER,
+                child: label,
+            }),
         });
+        this._label = label;
     }
 
     sync(state, pillStyle) {
-        this.child.text = state.label;
+        this._label.text = state.label;
         this.accessible_name = workspaceAccessibleName(state);
         this.visible = state.visible;
-        this.style = state.active ? pillStyle : null;
-        this.child.opacity = state.empty && !state.active ? EMPTY_OPACITY : 255;
+        this.child.style = state.active ? pillStyle : null;
+        this._label.opacity = state.empty && !state.active ? EMPTY_OPACITY : 255;
     }
 }
 
