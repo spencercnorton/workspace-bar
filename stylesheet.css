@@ -7,23 +7,30 @@
 
 /* The labels inherit the top bar's text colour, so they suit both the dark
  * and the light top bar. extension.js sets the active workspace's colours from
- * the accent colour, and dims the names of empty workspaces. */
+ * the accent colour, and dims the names of empty workspaces. The names are
+ * bold: at the regular weight they are thin over a translucent top bar. */
 .workspace-bar-button {
   margin: 0 4px;
+  font-weight: bold;
+}
+
+/* The pill sits inside the button, as tall as the name, so the top bar
+ * shows above and below it. */
+.workspace-bar-pill {
   padding: 1px 6px;
   /* The keyboard focus ring is this border. St draws an inset shadow only
    * over a background or a border, so a shadow ring would not show on an
    * inactive button. The border takes 2px of the padding: nothing moves. */
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: 4px;
   transition-duration: 250ms;
 }
 
-.workspace-bar-button:hover {
+.workspace-bar-button:hover .workspace-bar-pill {
   background-color: rgba(128, 128, 128, 0.25);
 }
 
-.workspace-bar-button:focus {
+.workspace-bar-button:focus .workspace-bar-pill {
   border-color: -st-accent-color;
 }
 
