@@ -19,10 +19,11 @@ test -f "${shell}/Shell-18.typelib"
 # shellcheck disable=SC2016
 GI_TYPELIB_PATH="${mutter}:${shell}" LD_LIBRARY_PATH="${shell}:${mutter}" gjs -c '
 imports.gi.versions.Clutter = "18";
+imports.gi.versions.Graphene = "1.0";
 imports.gi.versions.Meta = "18";
 imports.gi.versions.Shell = "18";
 imports.gi.versions.St = "18";
-const {Atk, Clutter, GObject, Meta, Shell, St} = imports.gi;
+const {Atk, Clutter, GObject, Graphene, Meta, Shell, St} = imports.gi;
 const need = (ok, what) => {
     if (!ok)
         throw new Error(`GNOME Shell 50 API is missing: ${what}`);
@@ -45,6 +46,10 @@ need(GObject.signal_lookup("window-added", Meta.Workspace) !== 0, "Meta.Workspac
 need(typeof Meta.Window.prototype.is_on_all_workspaces === "function", "Meta.Window.is_on_all_workspaces");
 need(typeof Shell.Stack === "function" && typeof St.Entry === "function" &&
     typeof St.ScrollView === "function", "Shell.Stack, St.Entry and St.ScrollView");
+need(typeof Graphene.Point === "function", "Graphene.Point");
+need(typeof Clutter.BinLayout === "function" && typeof Clutter.Timeline === "function", "Clutter.BinLayout and Clutter.Timeline");
+need(Clutter.AnimationMode.CUBIC_BEZIER !== undefined && Clutter.AnimationMode.EASE_OUT_CUBIC !== undefined, "Clutter.AnimationMode");
+need(Meta.MotionDirection.LEFT !== undefined && Meta.MotionDirection.RIGHT !== undefined, "Meta.MotionDirection");
 print("GNOME Shell 50 introspection contract is present");
 '
 
@@ -68,6 +73,7 @@ need ui/popupMenu.js 'export class PopupMenu '
 need ui/popupMenu.js 'export class PopupMenuSection '
 need ui/popupMenu.js 'export const Ornament '
 need ui/windowManager.js 'handleWorkspaceScroll(event) {'
+need ui/workspaceAnimation.js 'animateSwitch(from, to, direction, onComplete) {'
 need misc/animationUtils.js 'export function ensureActorVisibleInScrollView('
 echo "GNOME Shell 50 modules export what the extension imports"
 

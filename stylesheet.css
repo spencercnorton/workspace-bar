@@ -22,12 +22,16 @@
    * over a background or a border, so a shadow ring would not show on an
    * inactive button. The border takes 2px of the padding: nothing moves. */
   border: 2px solid transparent;
-  border-radius: 4px;
-  transition-duration: 250ms;
+  border-radius: 5px;
 }
 
-.workspace-bar-button:hover .workspace-bar-pill {
+.workspace-bar-pill-bg {
+  border-radius: 5px;
+}
+
+.workspace-bar-button:hover .workspace-bar-pill-bg {
   background-color: rgba(128, 128, 128, 0.25);
+  transition-duration: 150ms;
 }
 
 .workspace-bar-button:focus .workspace-bar-pill {

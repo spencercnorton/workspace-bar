@@ -84,6 +84,10 @@ class Actor extends Emitter {
     }
     show() { this.visible = true; }
     hide() { this.visible = false; }
+    is_mapped() { return this.visible; }
+    set_pivot_point(x, y) { this.pivot = [x, y]; }
+    set_scale(x, y) { this.scale = [x, y]; }
+    set_size(w, h) { this.width = w; this.height = h; }
     ease({onComplete, duration: _d, mode: _m, ...values}) { Object.assign(this, values); onComplete?.(); }
     grab_key_focus() { stage.grabFocus(this); }
     navigate_focus() { return false; }
@@ -252,16 +256,71 @@ panel.addToStatusArea = (role, indicator, position, box) => {
     panel.statusArea[role] = indicator;
     indicator.connect('destroy', () => delete panel.statusArea[role]);
 };
+const origAnimateSwitch = () => {};
 const wm = {
     scrolled: [],
     handleWorkspaceScroll(event) { this.scrolled.push(event); return 'scroll handled'; },
+    _workspaceAnimation: {
+        _swipeTracker: {enabled: true},
+        _switchData: null,
+        animateSwitch: origAnimateSwitch,
+        _prepareWorkspaceSwitch() {
+            const clone = new Actor();
+            const windowActor = {width: 1920, height: 1080};
+            const fromWs = manager.get_workspace_by_index(0);
+            const toWs = manager.get_workspace_by_index(1);
+            const monitorGroup = Object.assign(new Actor(), {
+                index: 0,
+                progress: 0,
+                _workspaceGroups: [
+                    {workspace: fromWs, _windowRecords: [{clone, windowActor}]},
+                    {workspace: toWs, _windowRecords: []},
+                ],
+                getWorkspaceProgress: ws => (ws === toWs ? 1 : 0),
+                ease_property(prop, target, params) {
+                    this[prop] = 0.5;
+                    this.emit(`notify::${prop}`);
+                    this[prop] = target;
+                    this.emit(`notify::${prop}`);
+                    params.onComplete?.();
+                },
+                get_transition: () => ({set_cubic_bezier_progress() {}}),
+            });
+            this._switchData = {monitors: [monitorGroup], inProgress: false};
+        },
+        _finishWorkspaceSwitch() {
+            this._switchData.monitors.forEach(m => m.destroy());
+            this._switchData = null;
+        },
+    },
 };
+const layoutManager = {primaryIndex: 0};
+
+class Timeline {
+    constructor(params = {}) { Object.assign(this, params); this.handlers = []; }
+    connect(signal, fn) { this.handlers.push({signal, fn}); }
+    get_progress() { return this._progress ?? 1; }
+    start() {
+        for (const p of [0.5, 1.0]) {
+            this._progress = p;
+            for (const h of this.handlers.filter(item => item.signal === 'new-frame'))
+                h.fn(this);
+        }
+        for (const h of this.handlers.filter(item => item.signal === 'completed'))
+            h.fn(this);
+    }
+    stop() { this.handlers = []; }
+}
 
 globalThis.__stubs = {
     Atk: {Role: {PUSH_BUTTON: 'push button', TOOL_BAR: 'tool bar'}},
     Clutter: {
-        ActorAlign: {START: 1, END: 2, CENTER: 3},
-        AnimationMode: {EASE_OUT_QUAD: 1},
+        ActorAlign: {FILL: 0, START: 1, END: 2, CENTER: 3},
+        AnimationMode: {EASE_OUT_QUAD: 1, EASE_OUT_CUBIC: 2, CUBIC_BEZIER: 3},
+        BinLayout: class {},
+        Timeline,
+        TextDirection: {RTL: 2},
+        get_default_text_direction: () => 1,
         BUTTON_PRIMARY: 1,
         BUTTON_SECONDARY: 3,
         EVENT_PROPAGATE: false,
@@ -270,13 +329,15 @@ globalThis.__stubs = {
     },
     Gio: {Settings},
     GObject: {registerClass: (klass, maybeKlass) => maybeKlass ?? klass, signals: Symbol('signals'), BindingFlags: {DEFAULT: 0}},
+    Graphene: {Point: class { constructor(params = {}) { Object.assign(this, params); } }},
+    Meta: {MotionDirection: {UP: 0, DOWN: 1, LEFT: 2, RIGHT: 3, UP_LEFT: 4, UP_RIGHT: 5, DOWN_LEFT: 6, DOWN_RIGHT: 7}},
     Shell: {Stack: Actor},
     St: {
-        Bin: Actor, BoxLayout: Actor, Button, Entry, Label, ScrollView: Actor,
+        Bin: Actor, BoxLayout: Actor, Button, Entry, Label, ScrollView: Actor, Widget: Actor,
         ButtonMask: {ONE: 1}, DirectionType: {TAB_FORWARD: 0}, Side: {TOP: 0},
         ThemeContext: {get_for_stage: () => themeContext},
     },
-    'ui/main.js': {panel, wm},
+    'ui/main.js': {layoutManager, panel, wm},
     'ui/panelMenu.js': {Button: PanelButton},
     'ui/popupMenu.js': {Ornament: {NONE: 0, CHECK: 2}, PopupBaseMenuItem, PopupMenu, PopupMenuSection},
     'misc/animationUtils.js': {ensureActorVisibleInScrollView: () => {}},
@@ -311,10 +372,11 @@ const mutterSettings = new Settings({schema_id: 'org.gnome.mutter'});
 const bar = () => panel.statusArea[uuid];
 const buttons = () => bar().get_children()[0].get_children();
 const menuItems = () => [...bar().menu.box.children[0].children[0]];
-const PURPLE_PILL = 'background-color: rgb(21,18,39); color: rgb(173,162,232);';
-// Each button holds the pill, and the pill holds the name.
-const pills = () => buttons().map(b => b.child);
-const labels = () => pills().map(p => p.child);
+const PURPLE_PILL = 'background-color: rgb(21,18,39);';
+// Each button holds the pill stack (wake, pill background, and label bin).
+const pills = () => buttons().map(b => b.child.children[1]);
+const labelBins = () => buttons().map(b => b.child.children[2]);
+const labels = () => labelBins().map(p => p.child);
 const names = () => labels().map(l => l.text);
 const colours = () => labels().map(l => l.colour);
 
@@ -357,11 +419,17 @@ test('the Activities button is hidden, not its container', () => {
 });
 
 test('a click switches workspace and the pill follows', () => {
+    buttons().forEach((b, i) => {
+        b.x = i * 70;
+        b.child.x = 0;
+        b.child.width = 56;
+    });
     buttons()[2].emit('clicked');
     assert.equal(manager.active, 2);
     assert.equal(manager.workspaces[2].activatedAt, 1234);
     assert.deepEqual(pills().map(p => p.style), [null, null, PURPLE_PILL, null]);
     assert.deepEqual(labels().map(l => l.opacity), [255, 255, 255, 166]);
+    assert.equal(pills()[2].translation_x, 0);
 });
 
 test('a secondary click or the menu key opens the menu; a primary click on the gaps does not', () => {
@@ -437,7 +505,8 @@ test('a menu item switches to its workspace', () => {
 test('the pill follows an accent colour change', () => {
     themeContext.accent = {red: 48, green: 130, blue: 128, alpha: 255};
     themeContext.emit('changed');
-    assert.equal(pills()[3].style, 'background-color: rgb(9,23,23); color: rgb(131,180,179);');
+    assert.equal(pills()[3].style, 'background-color: rgb(9,23,23);');
+    assert.equal(colours()[3], 'rgb(131,180,179)');
 });
 
 test('with dynamic workspaces the trailing empty workspace gets no button', () => {
@@ -448,11 +517,21 @@ test('with dynamic workspaces the trailing empty workspace gets no button', () =
     assert.deepEqual(buttons().map(b => b.visible), [true, true, true, true]);
 });
 
+test('workspace switch animation hooks animateSwitch and restores on disable', () => {
+    assert.notEqual(wm._workspaceAnimation.animateSwitch, origAnimateSwitch);
+    let completed = false;
+    wm._workspaceAnimation.animateSwitch(0, 1, 3, () => { completed = true; });
+    assert.equal(completed, true);
+    assert.equal(wm._workspaceAnimation._switchData, null);
+    assert.equal(wm._workspaceAnimation._swipeTracker.enabled, true);
+});
+
 test('disable restores Activities and leaves no handler or actor behind', () => {
     const menuActor = bar().menu.actor;
     extension.disable();
 
     assert.equal(bar(), undefined);
+    assert.equal(wm._workspaceAnimation.animateSwitch, origAnimateSwitch);
     assert.equal(panel.statusArea.activities.visible, true);
     assert.deepEqual(panel._leftBox.children, [panel.statusArea.activities.container]);
     assert.ok(menuActor.destroyed);

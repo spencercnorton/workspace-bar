@@ -2,6 +2,11 @@
 
 All notable changes to Workspace Bar are documented here.
 
+## 1.0.2 — 2026-10-14
+
+- Switching workspaces animates the active top-bar pill and a trailing wake streak across from the previous button into the new one with directional speed-stretch, while keeping workspace names stationary and crisp.
+- Desktop workspace transitions use a 195 ms whip-pan cubic-bezier curve with per-window directional speed-stretch, perpendicular compression, and depth-scaled velocity lag without triggering offscreen flatten FBOs or wallpaper overlap.
+
 ## 1.0.1 — 2026-10-05
 
 - The active workspace's pill is as tall as its name, so the top bar shows above and below it, instead of filling the whole height of the top bar. Clicking anywhere in the top bar's height still switches workspace.
