@@ -35,6 +35,8 @@ for (const name of ["accessible-name", "accessible-role", "can-focus", "track-ho
     "label", "icon-name", "toggle-mode", "checked", "button-mask", "reactive", "style", "opacity"])
     need(buttonProperties.has(name), `St.Button:${name}`);
 need(typeof St.ThemeContext.prototype.get_accent_color === "function", "St.ThemeContext.get_accent_color");
+need(typeof St.ThemeNode.prototype.get_foreground_color === "function", "St.ThemeNode.get_foreground_color");
+need(typeof St.Widget.prototype.get_theme_node === "function", "St.Widget.get_theme_node");
 need(GObject.signal_lookup("changed", St.ThemeContext) !== 0, "St.ThemeContext::changed");
 need(GObject.signal_lookup("popup-menu", St.Widget) !== 0, "St.Widget::popup-menu");
 need(GObject.signal_lookup("clicked", St.Button) !== 0, "St.Button::clicked");
@@ -74,6 +76,8 @@ need ui/popupMenu.js 'export class PopupMenuSection '
 need ui/popupMenu.js 'export const Ornament '
 need ui/windowManager.js 'handleWorkspaceScroll(event) {'
 need ui/workspaceAnimation.js 'animateSwitch(from, to, direction, onComplete) {'
+need ui/workspaceAnimation.js '_switchWorkspaceBegin(tracker, monitor) {'
+need ui/workspaceAnimation.js '_finishWorkspaceSwitch(switchData) {'
 need misc/animationUtils.js 'export function ensureActorVisibleInScrollView('
 echo "GNOME Shell 50 modules export what the extension imports"
 

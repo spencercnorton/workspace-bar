@@ -4,7 +4,8 @@
 
 // The parts of Workspace Bar that need no GNOME Shell, so that Node can test
 // them: what each button shows, what a rename writes back to the
-// workspace-names setting, and the colours of the active workspace.
+// workspace-names setting, the colours of the active workspace, and where
+// the moving pill sits part-way through a workspace switch.
 
 export function workspaceLabel(names, index) {
     return names[index]?.trim() || `Workspace ${index + 1}`;
@@ -94,4 +95,45 @@ export function accentPill({red, green, blue}) {
             break;
     }
     return {background, foreground};
+}
+
+// The [r, g, b] colour part-way from `a` to `b`, for crossfading a label
+// between the top bar's colour and the active pill's foreground as the pill
+// passes over it.
+export function mixColour(a, b, t) {
+    const f = Math.min(1, Math.max(0, t));
+    return a.map((c, i) => Math.round(c + (b[i] - c) * f));
+}
+
+// Where the pill sits at a fractional workspace index: on a button's rect at
+// whole indices, straight between the neighbouring rects in between — its
+// width included, so it arrives already the next name's size. `rects` are
+// the buttons' {x, width} in one shared coordinate space, in workspace
+// order. Returns null when there are no buttons.
+export function pillRectAt(rects, fraction) {
+    if (!rects.length)
+        return null;
+    const f = Math.min(rects.length - 1, Math.max(0, fraction));
+    const lower = Math.floor(f);
+    const upper = Math.ceil(f);
+    const t = f - lower;
+    const a = rects[lower];
+    const b = rects[upper];
+    return {
+        x: a.x + (b.x - a.x) * t,
+        width: a.width + (b.width - a.width) * t,
+    };
+}
+
+// GNOME lays the switching workspaces out in `indices` order and reports
+// progress in that laid-out space (0 at the first group, 1 at the second…).
+// Turn it back into a fractional workspace index the bar can follow. This
+// mirrors the transform GNOME binds to its own workspaces adjustment.
+export function fractionalWorkspaceIndex(indices, progress) {
+    if (!indices.length)
+        return 0;
+    const p = Math.min(indices.length - 1, Math.max(0, progress));
+    const lower = Math.floor(p);
+    const upper = Math.ceil(p);
+    return indices[lower] + (indices[upper] - indices[lower]) * (p - lower);
 }

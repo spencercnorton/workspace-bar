@@ -17,57 +17,31 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 
-import {accentPill, buildWorkspaceModel, workspaceAccessibleName} from './model.js';
+import {
+    accentPill,
+    buildWorkspaceModel,
+    fractionalWorkspaceIndex,
+    mixColour,
+    pillRectAt,
+    workspaceAccessibleName,
+} from './model.js';
 import {WorkspacesMenu} from './workspacesMenu.js';
 
 // The names of empty workspaces other than the active one are drawn at 65%
 // opacity. Only the name: the focus ring and the hover stay at full strength.
 const EMPTY_OPACITY = 166;
 
-// Tuned for 120Hz displays (~23 frames at 120Hz): smooth multi-frame whip-pan
-// launch (no single-frame teleport) that streaks across with directional
-// speed-stretch and locks crisply into place.
-const WORKSPACE_ANIMATION_DURATION = 195;
+// A workspace switch is one rigid slide of the whole desktop, so the next
+// workspace reads as already open beside this one rather than conjured up.
+// 360 ms gives the eye time to follow the travel — about 43 frames at
+// 120 Hz — and this gentle ease-out starts slower than stock GNOME's, so
+// the first frame is a small step rather than a jump, then settles without
+// a snap. Nothing stretches or lags: windows, wallpaper and the top-bar
+// pill all follow this one progress (see WorkspaceBar's pill flight).
+const WORKSPACE_ANIMATION_DURATION = 360;
 const WORKSPACE_ANIMATION_MODE = Clutter.AnimationMode.CUBIC_BEZIER;
-const WORKSPACE_BEZIER_P1 = new Graphene.Point({x: 0.20, y: 0.72});
-const WORKSPACE_BEZIER_P2 = new Graphene.Point({x: 0.20, y: 1.0});
-
-// Stretched speed-blur tuning parameters.
-// Keeping WorkspaceGroup and Meta.WindowActor at 100% opacity (255) with zero
-// extra Clutter.Clone actors prevents Mutter's _ClutterFlattenEffect from
-// redirecting open windows into offscreen FBOs on frame 1 (which caused open
-// apps to flicker) and prevents adjacent workspace wallpapers from overlapping.
-const WINDOW_SPEED_STRETCH = 0.34;
-const WINDOW_PERP_COMPRESS = 0.06;
-const WINDOW_VELOCITY_LAG = 110;
-
-function evaluateCubicBezier(p1x, p1y, p2x, p2y, t) {
-    if (t <= 0)
-        return 0;
-    if (t >= 1)
-        return 1;
-
-    const cx = 3.0 * p1x;
-    const bx = 3.0 * (p2x - p1x) - cx;
-    const ax = 1.0 - cx - bx;
-
-    const cy = 3.0 * p1y;
-    const by = 3.0 * (p2y - p1y) - cy;
-    const ay = 1.0 - cy - by;
-
-    let u = t;
-    for (let i = 0; i < 6; i++) {
-        const x = ((ax * u + bx) * u + cx) * u - t;
-        if (Math.abs(x) < 1e-5)
-            break;
-        const dx = (3.0 * ax * u + 2.0 * bx) * u + cx;
-        if (Math.abs(dx) < 1e-6)
-            break;
-        u -= x / dx;
-    }
-    u = Math.min(1, Math.max(0, u));
-    return ((ay * u + by) * u + cy) * u;
-}
+const WORKSPACE_BEZIER_P1 = new Graphene.Point({x: 0.25, y: 0.90});
+const WORKSPACE_BEZIER_P2 = new Graphene.Point({x: 0.25, y: 1.0});
 
 class WorkspaceButton extends St.Button {
     static {
@@ -80,29 +54,16 @@ class WorkspaceButton extends St.Button {
         // button already on screen black.
         const label = new St.Label();
 
-        // Separate the pill background actors from the label container inside a
+        // Separate the pill background from the label container inside a
         // BinLayout with x_expand/y_expand so that:
         //   1. At rest, _pillBg fills the exact same box as _labelBin.
-        //   2. During a workspace switch, _pillBg and its trailing speed-blur
-        //      wake (_pillWake) streak from the previous button's coordinates
-        //      into place without moving or distorting the text label.
+        //   2. During a workspace switch, the bar's pill flight moves one
+        //      button's _pillBg between the buttons' boxes, following the
+        //      desktop's progress, without moving or distorting any label.
         const pillStack = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
             y_align: Clutter.ActorAlign.CENTER,
         });
-
-        const pillWake = new St.Widget({
-            style_class: 'workspace-bar-pill workspace-bar-pill-bg',
-            reactive: false,
-            can_focus: false,
-            visible: false,
-            opacity: 0,
-            x_expand: true,
-            y_expand: true,
-            x_align: Clutter.ActorAlign.FILL,
-            y_align: Clutter.ActorAlign.FILL,
-        });
-        pillWake.set_pivot_point(0.5, 0.5);
 
         const pillBg = new St.Widget({
             style_class: 'workspace-bar-pill workspace-bar-pill-bg',
@@ -124,7 +85,6 @@ class WorkspaceButton extends St.Button {
             child: label,
         });
 
-        pillStack.add_child(pillWake);
         pillStack.add_child(pillBg);
         pillStack.add_child(labelBin);
 
@@ -137,54 +97,78 @@ class WorkspaceButton extends St.Button {
         });
 
         this._label = label;
-        this._pillWake = pillWake;
         this._pillBg = pillBg;
         this._labelBin = labelBin;
-        this._animTimeline = null;
-
-        this.connect('destroy', () => this.stopPillAnimation());
     }
 
-    stopPillAnimation() {
-        if (this._animTimeline) {
-            const tl = this._animTimeline;
-            this._animTimeline = null;
-            tl.stop();
-        }
-        if (this._pillWake) {
-            this._pillWake.visible = false;
-            this._pillWake.opacity = 0;
-            this._pillWake.translation_x = 0;
-            this._pillWake.set_scale(1.0, 1.0);
-        }
-        if (this._pillBg) {
-            this._pillBg.translation_x = 0;
-            this._pillBg.translation_y = 0;
-            this._pillBg.set_scale(1.0, 1.0);
+    // This button's pill box in the bar's shared coordinates (the button's
+    // allocation plus the stack's within it), for the bar's pill flight.
+    pillAllocation() {
+        const stack = this.child;
+        return {x: this.x + stack.x, width: stack.width};
+    }
+
+    // Draw this button's pill background at `rect` (shared coordinates) by
+    // translating and widening it from its own box: the pill itself moves,
+    // at exactly its drawn size, so it neither stretches nor squashes.
+    showPillAt(rect, pillBgStyle) {
+        const own = this.pillAllocation();
+        if (!(own.width > 0) || !(rect.width > 0))
+            return;
+        this._pillBg.style = pillBgStyle;
+        this._pillBg.set_pivot_point(0.5, 0.5);
+        this._pillBg.translation_x =
+            (rect.x + rect.width * 0.5) - (own.x + own.width * 0.5);
+        this._pillBg.translation_y = 0;
+        this._pillBg.set_scale(rect.width / own.width, 1.0);
+    }
+
+    clearPillTransform() {
+        this._pillBg.translation_x = 0;
+        this._pillBg.translation_y = 0;
+        this._pillBg.set_scale(1.0, 1.0);
+    }
+
+    hidePill() {
+        if (this._pillBg.style !== null)
+            this._pillBg.style = null;
+        this.clearPillTransform();
+    }
+
+    // The flight fades label colours through here, one style per frame.
+    setLabelColour(style) {
+        this._labelBin.style = style;
+    }
+
+    // The label's colour as the theme draws it, for the flight to fade
+    // from. Null when the theme cannot say (no node, no colour), in which
+    // case the flight falls back to switching colours at the halfway button.
+    readLabelColour() {
+        try {
+            const colour = this._label.get_theme_node().get_foreground_color();
+            return [Math.round(colour.red), Math.round(colour.green), Math.round(colour.blue)];
+        } catch (_) {
+            return null;
         }
     }
 
-    sync(state, pillBgStyle, pillFgStyle) {
+    sync(state, pillBgStyle, pillFgStyle, inFlight = false) {
         this._label.text = state.label;
         this.accessible_name = workspaceAccessibleName(state);
         this.visible = state.visible;
 
-        if (state.active) {
-            this._pillBg.style = pillBgStyle;
-            this._pillWake.style = pillBgStyle;
-            this._labelBin.style = pillFgStyle;
-            if (!this._animTimeline) {
-                this._pillBg.translation_x = 0;
-                this._pillBg.translation_y = 0;
-                this._pillBg.set_scale(1.0, 1.0);
-                this._pillWake.visible = false;
-                this._pillWake.opacity = 0;
+        // While a pill flight runs it owns the pill and label colours, frame
+        // by frame from the desktop's progress; it settles through a final
+        // sync with the flight over. Everything else still updates.
+        if (!inFlight) {
+            this.clearPillTransform();
+            if (state.active) {
+                this._pillBg.style = pillBgStyle;
+                this._labelBin.style = pillFgStyle;
+            } else {
+                this._pillBg.style = null;
+                this._labelBin.style = null;
             }
-        } else {
-            this.stopPillAnimation();
-            this._pillBg.style = null;
-            this._pillWake.style = null;
-            this._labelBin.style = null;
         }
 
         const targetOpacity = state.empty && !state.active ? EMPTY_OPACITY : 255;
@@ -199,76 +183,6 @@ class WorkspaceButton extends St.Button {
                 this._label.opacity = targetOpacity;
             }
         }
-    }
-
-    animateSpeedStretchFrom(prevBtn) {
-        this.stopPillAnimation();
-        if (!this.is_mapped() || !prevBtn || !prevBtn.visible || !this.visible)
-            return;
-
-        const fromW = prevBtn.child.width;
-        const toW = this.child.width;
-        if (fromW <= 0 || toW <= 0)
-            return;
-
-        const prevCenter = prevBtn.x + prevBtn.child.x + fromW * 0.5;
-        const nextCenter = this.x + this.child.x + toW * 0.5;
-        const deltaX = prevCenter - nextCenter;
-        if (Math.abs(deltaX) < 1)
-            return;
-
-        const startScaleX = fromW / toW;
-        const maxExtraStretch = Math.min(195, Math.abs(deltaX) * 1.12) / toW;
-
-        this._pillBg.set_pivot_point(0.5, 0.5);
-        this._pillBg.translation_x = deltaX;
-        this._pillBg.set_scale(startScaleX, 1.0);
-
-        this._pillWake.set_pivot_point(0.5, 0.5);
-        this._pillWake.translation_x = deltaX;
-        this._pillWake.set_scale(startScaleX, 1.0);
-        this._pillWake.opacity = 0;
-        this._pillWake.visible = true;
-
-        const timeline = new Clutter.Timeline({
-            actor: this,
-            duration: WORKSPACE_ANIMATION_DURATION,
-        });
-        this._animTimeline = timeline;
-
-        timeline.connect('new-frame', tl => {
-            const rawT = Math.min(1, Math.max(0, tl.get_progress()));
-            const p = evaluateCubicBezier(
-                WORKSPACE_BEZIER_P1.x, WORKSPACE_BEZIER_P1.y,
-                WORKSPACE_BEZIER_P2.x, WORKSPACE_BEZIER_P2.y,
-                rawT
-            );
-            const invP = 1.0 - p;
-            const velocity = Math.pow(Math.max(0, Math.sin(Math.PI * p)), 0.80);
-
-            const baseScaleX = startScaleX + (1.0 - startScaleX) * p;
-            const scaleX = baseScaleX + maxExtraStretch * velocity;
-            const scaleY = 1.0 - 0.15 * velocity;
-            const curTx = deltaX * invP;
-
-            this._pillBg.translation_x = curTx;
-            this._pillBg.set_scale(scaleX, scaleY);
-
-            // Trailing motion-blur wake streak behind the flying pill
-            const wakeLag = deltaX * Math.pow(invP, 0.60);
-            const wakeScaleX = scaleX + (maxExtraStretch * 0.80) * velocity;
-            this._pillWake.translation_x = (curTx + wakeLag) * 0.5;
-            this._pillWake.set_scale(wakeScaleX, scaleY * 0.90);
-            this._pillWake.opacity = Math.round(140 * velocity);
-        });
-
-        timeline.connect('completed', () => {
-            if (this._animTimeline !== timeline)
-                return;
-            this.stopPillAnimation();
-        });
-
-        timeline.start();
     }
 }
 
@@ -293,7 +207,10 @@ class WorkspaceBar extends PanelMenu.Button {
         this.add_style_class_name('workspace-bar');
         this.setMenu(new WorkspacesMenu(this));
 
-        this._activeIndex = -1;
+        // The pill flight: while a switch runs, the desktop's progress drives
+        // the pill between buttons (see setPillFraction). Null at rest.
+        this._pillFlight = null;
+        this.connect('destroy', () => (this._pillFlight = null));
 
         this._box = new St.BoxLayout({reactive: true});
         this._box.connect('button-press-event', (_actor, event) => {
@@ -326,7 +243,8 @@ class WorkspaceBar extends PanelMenu.Button {
     }
 
     _rebuild() {
-        this._activeIndex = -1;
+        // The flight's button boxes are about to stop existing.
+        this._pillFlight = null;
         this._box.destroy_all_children();
 
         const manager = global.workspace_manager;
@@ -352,9 +270,12 @@ class WorkspaceBar extends PanelMenu.Button {
         if (buttons.length !== manager.n_workspaces)
             return;
 
+        // A flight whose switch is gone (finished another way, or the
+        // controller torn down mid-switch) must not own the pill forever.
+        if (this._pillFlight && !Main.wm?._workspaceAnimation?._switchData)
+            this._pillFlight = null;
+
         const activeIndex = manager.get_active_workspace_index();
-        const prevIndex = this._activeIndex;
-        this._activeIndex = activeIndex;
 
         const model = buildWorkspaceModel({
             count: buttons.length,
@@ -371,107 +292,149 @@ class WorkspaceBar extends PanelMenu.Button {
         const pillBgStyle = `background-color: rgb(${background});`;
         const pillFgStyle = `color: rgb(${foreground});`;
 
-        const switched = prevIndex >= 0 && prevIndex !== activeIndex &&
-            prevIndex < buttons.length && activeIndex >= 0 && activeIndex < buttons.length;
-
+        const inFlight = this._pillFlight !== null;
         buttons.forEach((button, index) =>
-            button.sync(model[index], pillBgStyle, pillFgStyle));
+            button.sync(model[index], pillBgStyle, pillFgStyle, inFlight));
+    }
 
-        if (switched && this.is_mapped()) {
-            const prevBtn = buttons[prevIndex];
-            const nextBtn = buttons[activeIndex];
-            nextBtn.animateSpeedStretchFrom(prevBtn);
+    // Begin following a switch: remember each button's box and the colours
+    // to fade between. False when there is nothing allocated to follow —
+    // the pill then simply lands with the next sync.
+    _beginPillFlight() {
+        const buttons = this._box.get_children();
+        if (!buttons.length || !this.is_mapped())
+            return false;
+
+        // A button with no allocation — the hidden trailing workspace with
+        // dynamic workspaces — borrows its nearest allocated neighbour's
+        // size and sits just past it, so one unallocated box cannot stop
+        // the pill gliding between the rest.
+        const allocated = buttons.map(button => button.pillAllocation());
+        const firstAllocated = allocated.find(rect => rect.width > 0);
+        if (!firstAllocated)
+            return false;
+        let previous = null;
+        const rects = allocated.map(rect => {
+            if (rect.width > 0 && Number.isFinite(rect.x))
+                previous = rect;
+            else if (previous)
+                return {x: previous.x + previous.width, width: previous.width};
+            else
+                return {x: firstAllocated.x, width: firstAllocated.width};
+            return rect;
+        });
+
+        const [accent] = St.ThemeContext.get_for_stage(global.stage).get_accent_color();
+        const {background, foreground} = accentPill(accent);
+        const activeIndex = global.workspace_manager.get_active_workspace_index();
+        const inactiveButton = buttons.find((_, index) => index !== activeIndex);
+
+        this._pillFlight = {
+            rects,
+            background,
+            foreground,
+            inactive: inactiveButton?.readLabelColour() ?? null,
+        };
+        return true;
+    }
+
+    // Put the pill at a fractional workspace index, as reported by the
+    // desktop's own progress. The nearest button carries the pill at the
+    // interpolated rect; each label takes the colour for its closeness to
+    // the fraction, so highlight fades from one name into the next instead
+    // of flipping. Called with a new fraction mid-flight, it simply
+    // continues from wherever the pill was last drawn — a switch can be
+    // interrupted, reversed or retargeted without a jump.
+    setPillFraction(fraction) {
+        if (!Number.isFinite(fraction))
+            return;
+        if (!this._pillFlight && !this._beginPillFlight())
+            return;
+
+        const flight = this._pillFlight;
+        const buttons = this._box.get_children();
+        if (buttons.length !== flight.rects.length) {
+            this.endPillFlight();
+            return;
         }
-    }
-}
 
-function prepareWindowEntries(records) {
-    const entries = [];
-    const count = records.length;
-    for (let i = 0; i < count; i++) {
-        const rec = records[i];
-        const clone = rec?.clone;
-        const windowActor = rec?.windowActor;
-        if (!clone || !windowActor)
-            continue;
+        const rect = pillRectAt(flight.rects, fraction);
+        const carrier = Math.min(buttons.length - 1,
+            Math.max(0, Math.round(fraction)));
+        const pillBgStyle = `background-color: rgb(${flight.background});`;
 
-        // Explicitly size the clone from its source actor before setting its
-        // center pivot so frame 0 never computes a pivot against an unallocated
-        // (0x0) actor box.
-        const w = windowActor.width;
-        const h = windowActor.height;
-        if (w > 0 && h > 0)
-            clone.set_size(w, h);
+        buttons.forEach((button, index) => {
+            if (index === carrier)
+                button.showPillAt(rect, pillBgStyle);
+            else
+                button.hidePill();
 
-        clone.set_pivot_point(0.5, 0.5);
-        const depth = 0.65 + 0.35 * (i / Math.max(1, count - 1));
-        entries.push({clone, depth});
-    }
-    return entries;
-}
-
-function applySpeedBlurChoreography(monitorGroup, fromWs, toWs, fromProgress, toProgress) {
-    const deltaProgress = toProgress - fromProgress;
-    if (Math.abs(deltaProgress) <= 1e-5)
-        return;
-
-    const groups = monitorGroup._workspaceGroups;
-    if (!Array.isArray(groups))
-        return;
-
-    const fromGroup = groups.find(g => g.workspace === fromWs);
-    const toGroup = groups.find(g => g.workspace === toWs);
-    if (!fromGroup || !toGroup)
-        return;
-
-    const fromEntries = prepareWindowEntries(fromGroup._windowRecords ?? []);
-    const toEntries = prepareWindowEntries(toGroup._windowRecords ?? []);
-
-    const isVertical = global.workspace_manager.layout_rows === -1;
-    const axisSign = deltaProgress >= 0 ? 1 : -1;
-
-    const updateWindowEntries = (entries, velocity) => {
-        for (let i = 0; i < entries.length; i++) {
-            const {clone, depth} = entries[i];
-            const dv = depth * velocity;
-
-            const wStretch = 1.0 + WINDOW_SPEED_STRETCH * dv;
-            const wCompress = 1.0 - WINDOW_PERP_COMPRESS * dv;
-            const lag = axisSign * WINDOW_VELOCITY_LAG * dv;
-
-            if (isVertical) {
-                clone.set_scale(wCompress, wStretch);
-                clone.translation_x = 0;
-                clone.translation_y = lag;
+            if (flight.inactive) {
+                const closeness = Math.min(1,
+                    Math.max(0, 1 - Math.abs(fraction - index)));
+                button.setLabelColour(closeness <= 0
+                    ? null
+                    : `color: rgb(${mixColour(flight.inactive, flight.foreground, closeness)});`);
             } else {
-                clone.set_scale(wStretch, wCompress);
-                clone.translation_x = lag;
-                clone.translation_y = 0;
+                button.setLabelColour(index === carrier
+                    ? `color: rgb(${flight.foreground});`
+                    : null);
             }
-        }
-    };
+        });
+    }
 
-    const updateFrame = () => {
-        const rawP = (monitorGroup.progress - fromProgress) / deltaProgress;
-        const p = Math.min(1, Math.max(0, rawP));
-        const velocity = Math.pow(Math.max(0, Math.sin(Math.PI * p)), 0.80);
-
-        updateWindowEntries(fromEntries, velocity);
-        updateWindowEntries(toEntries, velocity);
-    };
-
-    monitorGroup.connect('notify::progress', updateFrame);
+    // The switch is over, settled or cancelled: hand the pill and label
+    // colours back to a plain sync on the workspace that is active now.
+    endPillFlight() {
+        if (!this._pillFlight)
+            return;
+        this._pillFlight = null;
+        this._sync();
+    }
 }
 
-function installWorkspaceAnimationHook() {
+// Follow one monitor's switch progress with the pill. The connection
+// belongs to the monitor group, which GNOME destroys when the switch
+// finishes, so nothing outlives the animation.
+function attachPillToMonitorGroup(bar, monitorGroup, workspaceIndices) {
+    if (!monitorGroup || monitorGroup._workspaceBarPill)
+        return;
+    monitorGroup._workspaceBarPill = true;
+    monitorGroup.connect('notify::progress', group =>
+        bar.setPillFraction(
+            fractionalWorkspaceIndex(workspaceIndices, group.progress)));
+    bar.setPillFraction(
+        fractionalWorkspaceIndex(workspaceIndices, monitorGroup.progress));
+}
+
+// GNOME's workspace animation, retimed, with the bar's pill riding the
+// same progress. Three methods are wrapped, each restored on disable:
+//
+//   animateSwitch         — keyboard, click and wheel switches: stock
+//                           GNOME with this bar's duration and curve, and
+//                           the pill attached to the primary monitor.
+//   _switchWorkspaceBegin — touchpad gestures: after GNOME prepares the
+//                           switch, attach the pill so it tracks the
+//                           fingers and the settle alike. The settle keeps
+//                           GNOME's own tracker timing; because the pill
+//                           follows progress either way, the two stay in
+//                           step without retiming the gesture.
+//   _finishWorkspaceSwitch — every ending, settled or cancelled, hands
+//                           the pill back to a plain sync.
+function installWorkspaceAnimationHook(bar) {
     const controller = Main.wm?._workspaceAnimation;
-    if (!controller || controller._origAnimateSwitch)
+    if (!controller || controller._workspaceBarOrig ||
+        typeof controller.animateSwitch !== 'function')
         return null;
 
-    const origAnimateSwitch = controller.animateSwitch;
-    controller._origAnimateSwitch = origAnimateSwitch;
+    const orig = {
+        animateSwitch: controller.animateSwitch,
+        switchBegin: controller._switchWorkspaceBegin,
+        finishSwitch: controller._finishWorkspaceSwitch,
+    };
+    controller._workspaceBarOrig = orig;
 
-    controller.animateSwitch = function(from, to, direction, onComplete) {
+    controller.animateSwitch = function (from, to, direction, onComplete) {
         this._swipeTracker.enabled = false;
 
         let workspaceIndices = [];
@@ -516,11 +479,12 @@ function installWorkspaceAnimationHook() {
             const toProgress = monitorGroup.getWorkspaceProgress(toWs);
             monitorGroup.progress = fromProgress;
 
-            try {
-                applySpeedBlurChoreography(
-                    monitorGroup, fromWs, toWs, fromProgress, toProgress);
-            } catch (err) {
-                console.error(`[workspace-bar] applySpeedBlurChoreography error: ${err}`);
+            if (monitorGroup === primaryGroup) {
+                try {
+                    attachPillToMonitorGroup(bar, monitorGroup, workspaceIndices);
+                } catch (err) {
+                    console.error(`[workspace-bar] pill attach error: ${err}`);
+                }
             }
 
             const params = {
@@ -554,11 +518,43 @@ function installWorkspaceAnimationHook() {
         }
     };
 
+    if (typeof orig.switchBegin === 'function') {
+        controller._switchWorkspaceBegin = function (...args) {
+            const result = orig.switchBegin.apply(this, args);
+            try {
+                const baseGroup = this._switchData?.baseMonitorGroup;
+                const indices = (baseGroup?._workspaceGroups ?? [])
+                    .map(group => group.workspace.index());
+                if (baseGroup && indices.length)
+                    attachPillToMonitorGroup(bar, baseGroup, indices);
+            } catch (err) {
+                console.error(`[workspace-bar] gesture pill attach error: ${err}`);
+            }
+            return result;
+        };
+    }
+
+    if (typeof orig.finishSwitch === 'function') {
+        controller._finishWorkspaceSwitch = function (...args) {
+            const result = orig.finishSwitch.apply(this, args);
+            try {
+                bar.endPillFlight();
+            } catch (err) {
+                console.error(`[workspace-bar] pill settle error: ${err}`);
+            }
+            return result;
+        };
+    }
+
     return () => {
-        if (controller._origAnimateSwitch) {
-            controller.animateSwitch = controller._origAnimateSwitch;
-            delete controller._origAnimateSwitch;
-        }
+        if (!controller._workspaceBarOrig)
+            return;
+        controller.animateSwitch = orig.animateSwitch;
+        if (typeof orig.switchBegin === 'function')
+            controller._switchWorkspaceBegin = orig.switchBegin;
+        if (typeof orig.finishSwitch === 'function')
+            controller._finishWorkspaceSwitch = orig.finishSwitch;
+        delete controller._workspaceBarOrig;
     };
 }
 
@@ -567,7 +563,7 @@ export default class WorkspaceBarExtension extends Extension {
         this._bar = new WorkspaceBar();
         Main.panel.addToStatusArea(this.uuid, this._bar, 0, 'left');
 
-        this._restoreAnimationHook = installWorkspaceAnimationHook();
+        this._restoreAnimationHook = installWorkspaceAnimationHook(this._bar);
 
         // The bar takes the place of the Activities button. Hide the button
         // itself, not its container: the panel shows every container again
