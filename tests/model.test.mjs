@@ -9,6 +9,9 @@ import {
     buildWorkspaceModel,
     contrastRatio,
     drawnColour,
+    fractionalWorkspaceIndex,
+    mixColour,
+    pillRectAt,
     renamedWorkspaceNames,
     workspaceAccessibleName,
     workspaceLabel,
@@ -164,4 +167,40 @@ test('the label is lightened no further than 7:1 as drawn needs', () => {
             }
         }
     }
+});
+
+test('the pill rect sits on a button at whole indices and glides between them', () => {
+    const rects = [{x: 0, width: 56}, {x: 70, width: 56}, {x: 140, width: 84}];
+
+    assert.deepEqual(pillRectAt(rects, 0), {x: 0, width: 56});
+    assert.deepEqual(pillRectAt(rects, 2), {x: 140, width: 84});
+    assert.deepEqual(pillRectAt(rects, 0.5), {x: 35, width: 56});
+    // Width interpolates too, so the pill arrives exactly the next name's size.
+    assert.deepEqual(pillRectAt(rects, 1.5), {x: 105, width: 70});
+});
+
+test('the pill rect clamps outside the ends and handles a single workspace', () => {
+    const rects = [{x: 10, width: 40}, {x: 60, width: 40}];
+
+    assert.deepEqual(pillRectAt(rects, -2), {x: 10, width: 40});
+    assert.deepEqual(pillRectAt(rects, 9), {x: 60, width: 40});
+    assert.deepEqual(pillRectAt([{x: 3, width: 5}], 0.7), {x: 3, width: 5});
+    assert.equal(pillRectAt([], 0), null);
+});
+
+test('monitor progress becomes a fractional index in the order groups were laid out', () => {
+    // A switch to the right lays out [from, to]; to the left, [to, from].
+    assert.equal(fractionalWorkspaceIndex([0, 1], 0.25), 0.25);
+    assert.equal(fractionalWorkspaceIndex([1, 0], 0.25), 0.75);
+    // A gesture prepares every workspace, and progress walks the whole row.
+    assert.equal(fractionalWorkspaceIndex([0, 1, 2, 3], 2.5), 2.5);
+    assert.equal(fractionalWorkspaceIndex([3, 2, 1, 0], 1.5), 1.5);
+    assert.equal(fractionalWorkspaceIndex([0, 1], 4), 1);
+    assert.equal(fractionalWorkspaceIndex([], 0.5), 0);
+});
+
+test('mixed colours clamp and round like drawn ones', () => {
+    assert.deepEqual(mixColour([238, 238, 238], [173, 162, 232], 0.5), [206, 200, 235]);
+    assert.deepEqual(mixColour([0, 0, 0], [255, 255, 255], -1), [0, 0, 0]);
+    assert.deepEqual(mixColour([0, 0, 0], [255, 255, 255], 2), [255, 255, 255]);
 });

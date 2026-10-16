@@ -2,6 +2,11 @@
 
 All notable changes to Workspace Bar are documented here.
 
+## 1.0.3 — 2026-10-16
+
+- Workspace switching is one rigid 360 ms slide with a gentle ease-out, replacing the 195 ms whip-pan and its per-window speed-stretch: windows and wallpaper now travel together, undistorted, so the next workspace reads as already open beside the current one.
+- The active pill rides the desktop's own switch progress — on keyboard, click, wheel and touchpad gesture switches alike — gliding between the buttons and fading each name's colour as it passes, instead of streaking on its own timing after the switch. Interrupted or cancelled switches carry it back from where it is.
+
 ## 1.0.2 — 2026-10-14
 
 - Switching workspaces animates the active top-bar pill and a trailing wake streak across from the previous button into the new one with directional speed-stretch, while keeping workspace names stationary and crisp.

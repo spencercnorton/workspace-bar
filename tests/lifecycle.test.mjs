@@ -92,6 +92,8 @@ class Actor extends Emitter {
     grab_key_focus() { stage.grabFocus(this); }
     navigate_focus() { return false; }
     get_accessible() { return null; }
+    // The top bar's text colour, as St would report it for a label.
+    get_theme_node() { return {get_foreground_color: () => ({red: 238, green: 238, blue: 238})}; }
 }
 
 // How St colours text. An St.Label takes its colour from its parents
@@ -209,6 +211,7 @@ const window = (options = {}) => ({skip_taskbar: false, is_on_all_workspaces: ()
 
 class Workspace extends Emitter {
     constructor(manager, windows) { super(); Object.assign(this, {manager, windows}); }
+    index() { return this.manager.workspaces.indexOf(this); }
     list_windows() { return this.windows; }
     activate(time) {
         this.activatedAt = time;
@@ -257,6 +260,14 @@ panel.addToStatusArea = (role, indicator, position, box) => {
     indicator.connect('destroy', () => delete panel.statusArea[role]);
 };
 const origAnimateSwitch = () => {};
+const origSwitchBegin = function () {
+    this._prepareWorkspaceSwitch();
+    this._switchData.baseMonitorGroup = this._switchData.monitors[0];
+};
+const origFinishSwitch = function () {
+    this._switchData.monitors.forEach(m => m.destroy());
+    this._switchData = null;
+};
 const wm = {
     scrolled: [],
     handleWorkspaceScroll(event) { this.scrolled.push(event); return 'scroll handled'; },
@@ -264,6 +275,8 @@ const wm = {
         _swipeTracker: {enabled: true},
         _switchData: null,
         animateSwitch: origAnimateSwitch,
+        _switchWorkspaceBegin: origSwitchBegin,
+        _finishWorkspaceSwitch: origFinishSwitch,
         _prepareWorkspaceSwitch() {
             const clone = new Actor();
             const windowActor = {width: 1920, height: 1080};
@@ -287,10 +300,6 @@ const wm = {
                 get_transition: () => ({set_cubic_bezier_progress() {}}),
             });
             this._switchData = {monitors: [monitorGroup], inProgress: false};
-        },
-        _finishWorkspaceSwitch() {
-            this._switchData.monitors.forEach(m => m.destroy());
-            this._switchData = null;
         },
     },
 };
@@ -373,9 +382,9 @@ const bar = () => panel.statusArea[uuid];
 const buttons = () => bar().get_children()[0].get_children();
 const menuItems = () => [...bar().menu.box.children[0].children[0]];
 const PURPLE_PILL = 'background-color: rgb(21,18,39);';
-// Each button holds the pill stack (wake, pill background, and label bin).
-const pills = () => buttons().map(b => b.child.children[1]);
-const labelBins = () => buttons().map(b => b.child.children[2]);
+// Each button holds the pill stack (pill background, then the label bin).
+const pills = () => buttons().map(b => b.child.children[0]);
+const labelBins = () => buttons().map(b => b.child.children[1]);
 const labels = () => labelBins().map(p => p.child);
 const names = () => labels().map(l => l.text);
 const colours = () => labels().map(l => l.colour);
@@ -519,11 +528,79 @@ test('with dynamic workspaces the trailing empty workspace gets no button', () =
 
 test('workspace switch animation hooks animateSwitch and restores on disable', () => {
     assert.notEqual(wm._workspaceAnimation.animateSwitch, origAnimateSwitch);
+    assert.notEqual(wm._workspaceAnimation._switchWorkspaceBegin, origSwitchBegin);
+    assert.notEqual(wm._workspaceAnimation._finishWorkspaceSwitch, origFinishSwitch);
     let completed = false;
     wm._workspaceAnimation.animateSwitch(0, 1, 3, () => { completed = true; });
     assert.equal(completed, true);
     assert.equal(wm._workspaceAnimation._switchData, null);
     assert.equal(wm._workspaceAnimation._swipeTracker.enabled, true);
+});
+
+test('the pill follows switch progress, fades the labels, and retargets without a jump', () => {
+    manager.workspaces[0].activate(1);
+    buttons().forEach((b, i) => {
+        b.x = i * 70;
+        b.child.x = 0;
+        b.child.width = 56;
+    });
+    // An unallocated button somewhere else in the bar (the hidden trailing
+    // workspace with dynamic workspaces) must not stop the glide.
+    buttons()[3].child.width = 0;
+
+    // Half-way from workspace 1 to 2 the pill sits between the buttons,
+    // carried by the nearer one, and both names are half-faded. (The
+    // accent is still the teal from the accent test above.)
+    bar().setPillFraction(0.5);
+    assert.deepEqual(pills().map(p => p.style),
+        [null, 'background-color: rgb(9,23,23);', null, null]);
+    assert.equal(pills()[1].translation_x, -35);
+    assert.deepEqual(pills()[1].scale, [1, 1]);
+    assert.deepEqual(colours().slice(0, 2), ['rgb(185,209,209)', 'rgb(185,209,209)']);
+
+    // Retargeted on to workspace 3 mid-flight, it continues from the new
+    // fraction: the carrier changes hands with no leftover pill behind.
+    bar().setPillFraction(2);
+    assert.deepEqual(pills().map(p => p.style),
+        [null, null, 'background-color: rgb(9,23,23);', null]);
+    assert.equal(pills()[1].translation_x, 0);
+    assert.equal(pills()[2].translation_x, 0);
+    assert.equal(colours()[2], 'rgb(131,180,179)');
+    assert.equal(colours()[1], 'top bar');
+
+    // A sync from restacking during the flight must not repaint the
+    // settled highlight underneath it.
+    wm._workspaceAnimation._switchData = {monitors: []};
+    display.emit('restacked');
+    assert.equal(pills()[2].style, 'background-color: rgb(9,23,23);');
+
+    // Settling hands everything back to a plain sync on the new workspace.
+    manager.active = 2;
+    wm._workspaceAnimation._switchData = null;
+    bar().endPillFlight();
+    assert.deepEqual(pills().map(p => p.style),
+        [null, null, 'background-color: rgb(9,23,23);', null]);
+    assert.ok(pills().every(p => (p.translation_x ?? 0) === 0));
+});
+
+test('a touchpad gesture carries the pill, and a cancelled one settles it back', () => {
+    manager.workspaces[0].activate(1);
+    wm._workspaceAnimation._switchWorkspaceBegin({}, 0);
+    const monitorGroup = wm._workspaceAnimation._switchData.monitors[0];
+
+    monitorGroup.progress = 0.5;
+    monitorGroup.emit('notify::progress');
+    assert.equal(pills()[1].style, 'background-color: rgb(9,23,23);');
+    assert.equal(pills()[1].translation_x, -35);
+
+    // The fingers go back and the switch finishes where it started.
+    monitorGroup.progress = 0;
+    monitorGroup.emit('notify::progress');
+    wm._workspaceAnimation._finishWorkspaceSwitch(wm._workspaceAnimation._switchData);
+    assert.equal(wm._workspaceAnimation._switchData, null);
+    assert.deepEqual(pills().map(p => p.style),
+        ['background-color: rgb(9,23,23);', null, null, null]);
+    assert.ok(pills().every(p => (p.translation_x ?? 0) === 0));
 });
 
 test('disable restores Activities and leaves no handler or actor behind', () => {
@@ -532,6 +609,8 @@ test('disable restores Activities and leaves no handler or actor behind', () => 
 
     assert.equal(bar(), undefined);
     assert.equal(wm._workspaceAnimation.animateSwitch, origAnimateSwitch);
+    assert.equal(wm._workspaceAnimation._switchWorkspaceBegin, origSwitchBegin);
+    assert.equal(wm._workspaceAnimation._finishWorkspaceSwitch, origFinishSwitch);
     assert.equal(panel.statusArea.activities.visible, true);
     assert.deepEqual(panel._leftBox.children, [panel.statusArea.activities.container]);
     assert.ok(menuActor.destroyed);
